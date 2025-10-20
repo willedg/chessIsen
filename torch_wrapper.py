@@ -29,27 +29,20 @@ class TorchNetWrapper:
         return tensor.to(self.device)
 
     def predict(self, board, temperature=1.0):
-        """
-        Retourne (policy_dict, value)
-        policy_dict maps UCI string -> probability (float)
-        Note: we compute softmax over the full action space.
-        """
         tensor = self.board_to_tensor_torch(board)
         with torch.no_grad():
-            logits, value_t = self.model(tensor)  # logits shape (1, ACTION_SIZE), value (1,1)
-            logits = logits.squeeze(0).cpu().numpy()  # (ACTION_SIZE,)
-            value = float(value_t.squeeze(0).squeeze(0).cpu().numpy())
+            logits, value_t = self.model(tensor)  # logits = (1,4864)
+            logits = logits.squeeze(0).cpu().numpy()  # => (4864,)
+            value = float(value_t.squeeze().cpu().numpy())
 
         # temperature softmax
         if temperature != 1.0:
-            logits = logits / float(temperature)
+            logits = logits / temperature
 
-        # numerical stable softmax
+        # stable softmax
         maxl = logits.max()
         exps = np.exp(logits - maxl)
         probs = exps / (exps.sum() + 1e-12)
 
-        # build dict only for convenience; MCTS will query only legal moves
-        policy_dict = {uci: float(probs[idx]) for idx, uci in enumerate(self.action_list)}
+        return probs, value
 
-        return policy_dict, value

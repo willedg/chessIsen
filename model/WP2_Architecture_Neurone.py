@@ -12,7 +12,7 @@ class NeuralNetwork(nn.Module):
         * une valeur (évaluation de la position entre -1 et 1)
     """
 
-    def __init__(self, input_channels=18, board_size=8, num_actions=4672):
+    def __init__(self, input_channels=18, board_size=8, num_actions=4864):
         super(NeuralNetwork, self).__init__()
 
         # === 1.Corps convolutionnel (feature extractor) ===

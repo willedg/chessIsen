@@ -3,6 +3,7 @@ import math
 import random
 from model.node import Node  # ton Node existant
 import numpy as np
+from model.action_encoding import move_to_action_index
 
 class MCTS:
     def __init__(self, network_wrapper, env, simulations=800, c_puct=1.4):
@@ -16,32 +17,38 @@ class MCTS:
         self.c_puct = c_puct
 
     def _get_priors_for_legal(self, board):
-        """
-        Appelle le réseau, récupère la policy sur l'ensemble des actions,
-        puis renvoie un dict {move (chess.Move): prior}
-        """
-        policy_dict, value = self.network.predict(board)
-        legal_moves = list(self.env.get_legal_moves(board))  # list of chess.Move
+        # 1) réseau donne logits et value
+        policy_logits, value = self.network.predict(board)   # logits ∈ R^4864
+        policy_logits = policy_logits.flatten()              # [4864]
+
+        # 2) softmax
+        exps = np.exp(policy_logits - np.max(policy_logits))
+        policy_vec = exps / np.sum(exps)
+
+        # 3) récupérer coups légaux
+        legal_moves = list(self.env.get_legal_moves(board))
         if len(legal_moves) == 0:
             return {}, value
 
         priors = {}
-        # map network's probabilities to actual Move objects by their uci
         for mv in legal_moves:
-            u = mv.uci()
-            p = policy_dict.get(u, 1e-8)  # fallback tiny prob if network didn't produce it
-            priors[mv] = p
-        # normalize priors on legal moves
+            idx = move_to_action_index(mv)
+            if idx is None:
+                continue  # coup hors espace actions (rare)
+            priors[mv] = float(policy_vec[idx])
+
+        # 4) renormalisation sur ONLY legal moves
         s = sum(priors.values())
         if s <= 0:
-            # uniform
+            # fallback uniforme
             k = 1.0 / len(priors)
             for m in priors:
                 priors[m] = k
         else:
             for m in priors:
-                priors[m] = priors[m] / s
-        return priors, value
+                priors[m] /= s
+
+        return priors, float(value)
 
     def run(self, root_state):
         root = Node(root_state)
