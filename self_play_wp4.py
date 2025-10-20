@@ -403,7 +403,7 @@ def generate_self_play_games(mcts: MCTS, num_games: int = 10, out_path: str = "s
 
     # sauvegarde compressée
     np.savez_compressed(out_path, states=states, pis=pis, zs=zs, players=players)
-    print(f"✅ Sauvegardé {states.shape[0]} positions dans {out_path}")
+    print(f"Sauvegardé {states.shape[0]} positions dans {out_path}")
     return out_path
 
 # ----------------------------
@@ -412,13 +412,11 @@ def generate_self_play_games(mcts: MCTS, num_games: int = 10, out_path: str = "s
 if __name__ == "__main__":
     # 1) instancier le modèle (assure-toi de donner ACTION_SIZE comme output)
     model = NeuralNetwork(input_channels=18, board_size=8, num_actions=ACTION_SIZE)
-    # si tu as un checkpoint :
-    # model.load_state_dict(torch.load("mon_modele.pth", map_location="cpu"))
 
     # 2) wrapper du model
     wrapper = TorchNetWrapper(model)
 
-    # 3) environnement (si tu as déjà une classe ChessEnv, adapte ici)
+    # 3) environnement
     class ChessEnv:
         def get_legal_moves(self, board):
             return list(board.legal_moves)
@@ -437,8 +435,7 @@ if __name__ == "__main__":
     env = ChessEnv()
 
     # 4) MCTS : on utilise la classe MCTS existante (mcts_with_net) ; on lui donne le wrapper et env
-    #    Si ta classe MCTS a un constructeur différent, adapte l'appel ci-dessous.
     mcts = MCTS(wrapper, env, simulations=200, c_puct=1.4)
 
     # 5) Lancement de la génération (par exemple 5 parties)
-    generate_self_play_games(mcts, num_games=5, out_path="selfplay_data.npz")
+    generate_self_play_games(mcts, num_games=10, out_path="selfplay_data.npz")
