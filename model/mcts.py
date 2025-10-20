@@ -13,7 +13,6 @@ class MCTS:
         policy, value = self.network.predict(root_state)
         legal_moves = self.env.get_legal_moves(root_state)
 
-        # ✅ correction ici
         priors = {}
         for move in legal_moves:
             move_uci = move.uci()
@@ -46,7 +45,7 @@ class MCTS:
                 n.update(value)
                 value = -value
 
-        # ✅ garde-fou si aucun enfant
+        # garde-fou si aucun enfant
         if not root.children:
             return {}, root.Q
 
