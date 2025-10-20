@@ -10,6 +10,10 @@ class MCTS:
 
     def run(self, root_state):
         root = Node(root_state)
+
+        if self.env.is_terminal(root_state):
+            return {}, self.env.get_result(root_state), root
+
         policy, value = self.network.predict(root_state)
         legal_moves = self.env.get_legal_moves(root_state)
 
