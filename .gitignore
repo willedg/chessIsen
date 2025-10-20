@@ -1,4 +1,4 @@
 test_mcts_chess.py
 test_mcts_suite.py
 mini_code.py
-__pycache__
+model/__pycache__
