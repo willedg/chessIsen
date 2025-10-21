@@ -10,8 +10,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
 # === Configuration des paramètres d'entraînement ===
-DATA_PATH = "/content/drive/MyDrive/Projet semaine 20 10 25 Echec/selfplay_data.npz"   # données générées par le MCTS
-MODEL_SAVE_PATH = "/content/drive/MyDrive/Projet semaine 20 10 25 Echec/trained_model_wp4_3.pt"  # chemin de sauvegarde du modèle
+DATA_PATH = "/.../selfplay_data.npz"   # données générées par le MCTS
+MODEL_SAVE_PATH = "/.../trained_model_wp4_3.pt"  # chemin de sauvegarde du modèle
 ACTION_SIZE = 4864      # taille de la sortie de la politique (nombre total d'actions possibles)
 BATCH_SIZE = 64         # taille du lot d'entraînement
 EPOCHS = 20             # nombre d'époques
