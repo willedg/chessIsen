@@ -19,8 +19,7 @@ import numpy as np
 import chess
 import random
 import torch
-import os
-from typing import Tuple, List
+from typing import Tuple
 
 # ----- IMPORT DE TES CLASSES (adapte le chemin si nécessaire) -----
 # On suppose que :
@@ -253,27 +252,26 @@ class TorchNetWrapper:
         self.model.to(self.device)
         self.model.eval()
 
-    def predict(self, board: chess.Board, temperature: float = 1.0) -> Tuple[np.ndarray, float]:
+    def board_to_tensor_torch(self, board):
+        # board_to_tensor est maintenant défini dans ce même fichier
+        arr = board_to_tensor(board).astype(np.float32)   # (18,8,8)
+        tensor = torch.from_numpy(arr).unsqueeze(0)       # (1,18,8,8)
+        return tensor.to(self.device)
+
+    def predict(self, board, temperature=1.0):
         """
-        Convertit le board en tenseur, passe dans le modèle et renvoie :
-          - probs : numpy array shape (ACTION_SIZE,) (softmax over logits)
-          - value : float (between -1 and 1)
+        Retourne (logits, value), sans softmax.
+        Le MCTS appliquera softmax et masquage lui-même.
         """
-        x = board_to_tensor(board)            # (18,8,8) float32
-        xt = torch.from_numpy(x).unsqueeze(0).to(self.device)  # (1,18,8,8)
+        tensor = self.board_to_tensor_torch(board)
+
         with torch.no_grad():
-            logits, val = self.model(xt)      # logits: (1, ACTION_SIZE), val: (1,1)
-            logits = logits.squeeze(0).cpu().numpy()
-            value = float(val.squeeze(0).squeeze(0).cpu().numpy())
+            logits_t, value_t = self.model(tensor)
+            logits = logits_t.squeeze(0).cpu().numpy()   # (4864,)
+            value = float(value_t.squeeze().cpu().numpy())
 
-        if temperature != 1.0:
-            logits = logits / float(temperature)
+        return logits, value
 
-        # Softmax stable
-        maxl = logits.max()
-        exps = np.exp(logits - maxl)
-        probs = exps / (exps.sum() + 1e-12)
-        return probs, value
 
 # ----------------------------
 # 4) Self-play : utiliser ton MCTS (mcts_with_net) et stocker données
@@ -407,17 +405,10 @@ def generate_self_play_games(mcts: MCTS, num_games: int = 10, out_path: str = "s
     return out_path
 
 # ----------------------------
-# 6) Exemple d'usage (main)
+# 6) Classe ChessEnv minimale pour MCTS
 # ----------------------------
-if __name__ == "__main__":
-    # 1) instancier le modèle (assure-toi de donner ACTION_SIZE comme output)
-    model = NeuralNetwork(input_channels=18, board_size=8, num_actions=ACTION_SIZE)
 
-    # 2) wrapper du model
-    wrapper = TorchNetWrapper(model)
-
-    # 3) environnement
-    class ChessEnv:
+class ChessEnv:
         def get_legal_moves(self, board):
             return list(board.legal_moves)
         def next_state(self, board, move):
@@ -431,11 +422,3 @@ if __name__ == "__main__":
             if oc is None: return 0.0
             if oc.winner is None: return 0.0
             return 1.0 if oc.winner else -1.0
-
-    env = ChessEnv()
-
-    # 4) MCTS : on utilise la classe MCTS existante (mcts_with_net) ; on lui donne le wrapper et env
-    mcts = MCTS(wrapper, env, simulations=200, c_puct=1.4)
-
-    # 5) Lancement de la génération (par exemple 5 parties)
-    generate_self_play_games(mcts, num_games=10, out_path="selfplay_data.npz")

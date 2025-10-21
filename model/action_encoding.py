@@ -17,7 +17,6 @@ Fonctions exportées :
   - move_to_action_plane_index(move) -> int in [0..75] or None
   - move_to_action_index(move) -> int in [0..4863] or None
   - action_index_to_move(action_index, from_square=None, board=None) -> chess.Move or None
-    (si from_square donné, l'index est relativisé ; sinon décodage complet)
 """
 
 from typing import Optional, Tuple
@@ -32,20 +31,17 @@ ACTION_SIZE = NUM_SQUARES * ACTION_PER_SQUARE  # 4864
 
 # ordre fixé des directions (dr = delta rank, df = delta file)
 # NOTE : chess.square_rank/square_file renvoient rank/file 0..7 (rank 0 = rangée 1)
+# L'ordre est déterminé et fixe — on l'utilise pour indexer 0..55.
 DIRS = [
     (1, 0),   # N  (vers rang supérieure)
     (-1, 0),  # S
     (0, 1),   # E
     (0, -1),  # W
     (1, 1),   # NE
-    (-1, 1),  # SE  (attention signe : -1 rank -> vers rang inférieure)
+    (-1, 1),  # SE
     (-1, -1), # SW
     (1, -1),  # NW
 ]
-# Remarque importante sur les signes :
-# - dr positif signifie avancer vers les rangs supérieures (ex: de rank 6->7 dr=+1)
-# - df positif signifie aller vers la colonne + (f->g->h)
-# L'ordre ci-dessus est déterminé et fixe. On l'utilise pour indexer 0..55.
 
 # cavalier (order arbitrary but fixed)
 KNIGHT_DELTAS = [
@@ -55,13 +51,13 @@ KNIGHT_DELTAS = [
 
 # promotions : 3 directions (straight, diag_left, diag_right) × 4 pièces (Q,R,B,N)
 PROMOTION_DIRS = [
-    (1, 0),   # straight (pour white dr=+1)
-    (1, -1),  # diag_left
-    (1, 1)    # diag_right
+    (1, 0),   # straight (white-forward)
+    (1, -1),  # diag_left (white perspective)
+    (1, 1)    # diag_right (white perspective)
 ]
 # ordre des pièces pour l'encodage promotions : Q, R, B, N
 PROMOTION_PIECES = ['q', 'r', 'b', 'n']
-PROMOTION_COUNT = len(PROMOTION_DIRS) * len(PROMOTION_PIECES)  # 3 * 4 = 12
+PROMOTION_COUNT = len(PROMOTION_DIRS) * len(PROMOTION_PIECES)  # 12
 
 # indices internes
 RAY_COUNT = 8 * 7  # 56
@@ -70,7 +66,7 @@ PROMO_COUNT = PROMOTION_COUNT  # 12
 
 # helper : conversion rank/file <-> square (python-chess)
 def rf_to_square(rank: int, file: int) -> int:
-    """Retourne l'index de case (0..63) à partir (rank, file)."""
+    """Retourne l'index de square (0..63) à partir (rank, file)."""
     return chess.square(file, rank)
 
 def square_to_rf(sq: int) -> Tuple[int, int]:
@@ -94,16 +90,13 @@ def move_to_action_plane_index(move: chess.Move) -> Optional[int]:
 
     # 1) RAY moves (8 directions × 7 steps) -> indices 0..55
     for dir_idx, (drr, dff) in enumerate(DIRS):
-        # check if movement is along this direction
+        # check movement along this direction
         if drr == 0 and dff == 0:
             continue
-        # if one of components is zero
+        # if one component zero
         if drr == 0:
             if dr != 0:
                 continue
-            if dff == 0:
-                continue
-            # dr == 0, check df divisible by dff
             if dff == 0:
                 continue
             if df == 0 or (df // dff) * dff != df:
@@ -128,7 +121,6 @@ def move_to_action_plane_index(move: chess.Move) -> Optional[int]:
             steps = abs(k1)
 
         if 1 <= steps <= 7:
-            # plane index within rays
             plane = dir_idx * 7 + (steps - 1)  # 0..55
             return plane
 
@@ -143,24 +135,16 @@ def move_to_action_plane_index(move: chess.Move) -> Optional[int]:
         try:
             prom_idx = PROMOTION_PIECES.index(prom_piece_char)
         except ValueError:
-            # improbable : si piece non standard -> fallback to queen
-            prom_idx = 0
+            prom_idx = 0  # fallback to queen
 
-        # pour promotions on attend dr = +1 (white) ou dr = -1 (black)
-        # on code la direction relative "white-forward", puis on ajustera selon couleur lors du décodage
-        # cependant ici on accepte dr's sign either +1 or -1 (on mappe selon signe)
-        # on normalise la direction vers le signe positif (on mappe sur PROMOTION_DIRS cadré pour white)
-        # Détecter direction relative (df == -1,0,1) et dr magnitude 1
+        # we accept dr sign either +1 or -1; map direction relative to 'white-forward'
         if abs(dr) == 1 and abs(df) <= 1:
-            # determine dir_type in {0,1,2} corresponding to PROMOTION_DIRS order
-            # We define "straight" as df==0, "diag_left" as df==-1, "diag_right" as df==+1
             if df == 0:
                 dir_type = 0
             elif df == -1:
                 dir_type = 1
             else:
                 dir_type = 2
-            # plane within promotions
             plane = RAY_COUNT + KNIGHT_COUNT + (dir_type * len(PROMOTION_PIECES) + prom_idx)  # 64..75
             return plane
 
@@ -188,10 +172,10 @@ def action_index_to_move(action_index: int, from_square: Optional[int] = None,
     - sinon action_index global [0..4863] -> on récupère from_square = action_index // 76
 
     Si board fourni, on vérifie la légalité du move et on ajuste la direction des promotions
-    (on utilise la couleur du joueur pour déterminer si la promotion va vers rank 7 ou rank 0).
+    (on utilise la couleur du pion si possible). Si board absent, on fait un décodage permissif (B2).
     """
     if from_square is not None:
-        # on suppose action_index est relatif (0..75)
+        # action_index relatif attendu dans [0..75]
         if not (0 <= action_index < ACTION_PER_SQUARE):
             return None
         from_sq = from_square
@@ -240,34 +224,21 @@ def action_index_to_move(action_index: int, from_square: Optional[int] = None,
     # direction relative 'white-forward' as stored in PROMOTION_DIRS:
     drr_rel, dff_rel = PROMOTION_DIRS[dir_type]  # example (1,0) straight
 
-    # si board fourni, tenter d'utiliser la couleur du pion pour déterminer to_rank sign
-    # pour white, forward = +1 (vers rank 7), pour black forward = -1
-    # on cherche la case de promotion en partant de from_square selon couleur et direction
+    # If board provided: try to determine promotion rank using pawn color on from_sq
     if board is not None:
-        # la pièce qui bouge doit être un pion ; si ce n'est pas le cas, on retourne None
         piece = board.piece_at(from_sq)
-        if piece is None or piece.piece_type != chess.PAWN:
-            # encore on retourne un object Move plausible (mais peut être illégal)
-            # on va quand même essayer les deux sens (white-like puis black-like)
-            pass
-
-        # déterminer couleur : si le pion concerné appartient au joueur qui a le trait,
-        # on peut utiliser board.turn pour déduire direction s'il s'agit du pion à jouer.
-        # Mais move peut être joué par le joueur adverse si on l'appelle hors contexte.
-        # On favorise l'usage : si there's a pawn of current player on from_sq, we use that color.
         use_white_first = False
-        piece = board.piece_at(from_sq)
         if piece is not None and piece.piece_type == chess.PAWN:
             use_white_first = (piece.color == chess.WHITE)
 
-        # candidate 1 : white-like promotion (to_rank = 7)
         candidates = []
         if use_white_first:
+            # white-like promotion: to_rank = 7
             to_r = 7
             to_f = fr_f + dff_rel
             if 0 <= to_r <= 7 and 0 <= to_f <= 7:
                 candidates.append((to_r, to_f))
-            # also try black-like fallback
+            # fallback black-like
             to_r_b = 0
             to_f_b = fr_f + dff_rel
             if 0 <= to_r_b <= 7 and 0 <= to_f_b <= 7:
@@ -284,7 +255,6 @@ def action_index_to_move(action_index: int, from_square: Optional[int] = None,
             if 0 <= to_r_w <= 7 and 0 <= to_f_w <= 7:
                 candidates.append((to_r_w, to_f_w))
 
-        # choose first candidate that looks reasonable (square in board); legality left to caller
         if not candidates:
             return None
         chosen_r, chosen_f = candidates[0]
@@ -292,11 +262,10 @@ def action_index_to_move(action_index: int, from_square: Optional[int] = None,
         return chess.Move(from_sq, to_sq, promotion=prom_piece)
 
     else:
-        # pas de board fourni : on retourne un move 'white-like' (promotion to rank 7)
+        # board None -> permissive fallback (B2): prefer white-like (rank 7), else black-like
         to_r = 7
         to_f = fr_f + dff_rel
         if not (0 <= to_r <= 7 and 0 <= to_f <= 7):
-            # fallback to rank 0
             to_r = 0
             to_f = fr_f + dff_rel
             if not (0 <= to_r <= 7 and 0 <= to_f <= 7):
@@ -306,43 +275,24 @@ def action_index_to_move(action_index: int, from_square: Optional[int] = None,
 
 
 # ------------------------
-# Tests rapides (si exécuté en tant que script)
+# Utils pour debug/tests
 # ------------------------
 if __name__ == "__main__":
-    # quelques tests basiques pour vérifier encodage/décodage
     import sys
     print("ACTION_SIZE:", ACTION_SIZE)
-    # tests pour quelques coups typiques
+    # tests basiques
     tests = [
-        "e2e4", "g1f3", "a2a4", "h2h4",   # ray + knight
-        "e7e8q", "a7a8r", "g7h8n", "b7c8b" # promotions
+        "e2e4", "g1f3", "a2a4", "h2h4",
+        "e7e8q", "a7a8r", "g7h8n", "b7c8b"
     ]
     board = chess.Board()
-    ok = True
     for uci in tests:
-        try:
-            mv = chess.Move.from_uci(uci)
-        except Exception as e:
-            print("Impossible de parser UCI:", uci, e)
-            ok = False
-            continue
+        mv = chess.Move.from_uci(uci)
         plane = move_to_action_plane_index(mv)
         idx = move_to_action_index(mv)
         print(f"{uci} -> plane {plane} idx {idx}")
-        # décoder
         if idx is not None:
             mv_back = action_index_to_move(idx, board=board)
-            print("  décodé (avec board) :", mv_back)
+            print("  décodé (avec board) :", mv_back, "legal?", mv_back in board.legal_moves if mv_back else None)
         else:
             print("  mapping non défini pour ce coup.")
-
-    # test roundtrip for all squares and some planes
-    sample_from = 0
-    sample_panels = [0, 10, 30, 56, 60, 64, 75]
-    # quick smoke
-    for fr in range(0, 64, 8):
-        for plane in sample_panels:
-            ai = fr * ACTION_PER_SQUARE + plane
-            mv = action_index_to_move(ai, board=None)
-            print(f"from {fr} plane {plane} -> {mv}")
-    print("Tests terminés.")

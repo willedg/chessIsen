@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 class NeuralNetwork(nn.Module):
     """
     Réseau de neurones de type AlphaZero :
