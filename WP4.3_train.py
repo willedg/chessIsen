@@ -2,6 +2,7 @@
 
 # Objectif : entraîner le réseau de neurones à reproduire la politique (π)
 # et la valeur (v) issues des parties self-play générées par le MCTS.
+# Nombre de parties : 10 
 
 import numpy as np
 import torch
