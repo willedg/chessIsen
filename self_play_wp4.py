@@ -284,36 +284,38 @@ def pi_dict_from_visit_counts(visit_counts: dict) -> dict:
     total = float(sum(visit_counts.values())) + 1e-12
     return {move: cnt/total for move, cnt in visit_counts.items()}
 
-def self_play_one_game(mcts: MCTS, sample_temperature: float = 1.0):
+def self_play_one_game(mcts: MCTS, max_moves: int = 300):
     """
     Joue une partie complète en self-play :
     - à chaque position, lance MCTS.run(board) pour obtenir pi (visit distribution) et value
     - construit pi_vector (ACTION_SIZE) en mappant chaque move -> move_to_action_index
     - choisit le coup par échantillonnage selon pi (sample)
+    - s'arrête après 'max_moves' coups et considère la partie comme une nulle
     - retourne arrays : states (T,18,8,8), pis (T,ACTION_SIZE), zs (T,), players (T,)
     """
     env = mcts.env
     board = chess.Board()
-    states = []
-    pis = []
-    players = []
+    states, pis, players = [], [], []
+    move_count = 0
 
     while not env.is_terminal(board):
-        # Lancer MCTS pour obtenir pi (dict move->prob) et value
-        pi_move_dict, value_est, _ = mcts.run(board)   # on suppose mcts.run renvoie (pi_dict, value, root)
-        # Si MCTS renvoie pi direct sous forme vectorielle, il faudra adapter — ici on suppose dict
+        move_count += 1
+        if move_count > max_moves:
+            print(f"[SELFPLAY] Partie arrêtée après {max_moves} coups (trop longue) → draw.")
+            result = "1/2-1/2"
+            break
 
-        # Construire pi_vector (ACTION_SIZE) initialisé à 0
+        # Lancer MCTS pour obtenir pi (dict move->prob) et value
+        pi_move_dict, value_est, _ = mcts.run(board)
+
+        # Construire pi_vector (ACTION_SIZE)
         pi_vector = np.zeros(ACTION_SIZE, dtype=np.float32)
-        # remplir pi_vector à partir de pi_move_dict
         for mv, p in pi_move_dict.items():
             idx = move_to_action_index(mv)
-            if idx is None:
-                # Si un move ne mappe pas (peu probable), on l'ignore
-                continue
-            pi_vector[idx] = p
+            if idx is not None:
+                pi_vector[idx] = p
 
-        # si somme nulle (sûreté), uniformiser sur coups légaux
+        # Sécurité : normalisation ou uniformisation
         s = pi_vector.sum()
         if s <= 0:
             legal = list(env.get_legal_moves(board))
@@ -321,61 +323,53 @@ def self_play_one_game(mcts: MCTS, sample_temperature: float = 1.0):
                 idx = move_to_action_index(mv)
                 if idx is not None:
                     pi_vector[idx] = 1.0 / len(legal)
-            s = pi_vector.sum()
-        # normalisation
-        pi_vector = pi_vector / (s + 1e-12)
+        pi_vector /= (pi_vector.sum() + 1e-12)
 
-        # Stocker état, pi et player
+        # Stocker état, pi et joueur
         states.append(board_to_tensor(board))
         pis.append(pi_vector)
         players.append(int(board.turn == chess.WHITE))
 
-        # Choix du coup : échantillonnage selon la distribution pondérée sur coups légaux
+        # Choisir le coup selon la distribution MCTS
         legal_moves = list(env.get_legal_moves(board))
-        # construire liste de probabilités pour ces coups
-        probs_for_legals = []
-        for mv in legal_moves:
-            probs_for_legals.append(pi_move_dict.get(mv, 0.0))
-        # si toutes 0 -> uniform
-        if sum(probs_for_legals) <= 0:
+        probs_for_legals = np.array([pi_move_dict.get(mv, 0.0) for mv in legal_moves], dtype=np.float32)
+        if probs_for_legals.sum() <= 0:
             chosen_move = random.choice(legal_moves)
         else:
-            arr = np.array(probs_for_legals, dtype=np.float32)
-            arr = arr / (arr.sum() + 1e-12)
-            # sample index
-            i = np.random.choice(len(legal_moves), p=arr)
-            chosen_move = legal_moves[i]
+            probs_for_legals /= probs_for_legals.sum() + 1e-12
+            chosen_move = np.random.choice(legal_moves, p=probs_for_legals)
 
-        # pousser le coup choisi
         board.push(chosen_move)
 
-    # La partie est terminée : déterminer résultat final et produire z pour chaque position
-    result = board.result()  # "1-0", "0-1", "1/2-1/2"
+    else:
+        # boucle terminée naturellement (pas de break)
+        result = board.result()
+
+    # Déterminer le vainqueur
     if result == "1-0":
         winner = 1
     elif result == "0-1":
         winner = -1
     else:
-        winner = 0
+        winner = 0  # draw
 
+    # Calculer les z pour chaque position
     zs = []
     for player in players:
         if winner == 0:
             z = 0.0
         else:
-            # z = +1 si le joueur à l'instant considéré a gagné, -1 sinon
-            if winner == 1:
-                z = 1.0 if player == 1 else -1.0
-            else: # winner == -1 (black)
-                z = 1.0 if player == 0 else -1.0
+            z = 1.0 if (winner == 1 and player == 1) or (winner == -1 and player == 0) else -1.0
         zs.append(z)
 
-    # convertir listes en arrays
-    states = np.stack(states).astype(np.float32)  # (T,18,8,8)
-    pis = np.stack(pis).astype(np.float32)        # (T,ACTION_SIZE)
-    zs = np.array(zs, dtype=np.float32)           # (T,)
-    players = np.array(players, dtype=np.int8)     # (T,)
+    # Conversion en arrays numpy
+    states = np.stack(states).astype(np.float32)
+    pis = np.stack(pis).astype(np.float32)
+    zs = np.array(zs, dtype=np.float32)
+    players = np.array(players, dtype=np.int8)
+
     return states, pis, zs, players
+
 
 # ----------------------------
 # 5) Génération N parties et sauvegarde

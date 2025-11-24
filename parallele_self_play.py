@@ -14,14 +14,15 @@ from model.action_encoding import ACTION_SIZE
 from self_play_wp4 import self_play_one_game, MCTS as MCTS_Class, TorchNetWrapper, ChessEnv
 
 # ---------------- CONFIG ----------------
-RUN_ID = "gen1"          # <<< À changer manuellement pour chaque génération
+RUN_ID = "gen1"
 NUM_GAMES = 20
 GAMES_PER_WORKER = 5
-NUM_WORKERS = max(1, os.cpu_count() - 1)
+NUM_WORKERS = 10
 SIMULATIONS = 200
 CPUCT = 1.4
 BASE_OUT = "selfplay_all"
 MODEL_PATH = None        # Si on veut charger un modèle existant
+MAX_MOVES_PER_GAME = 300
 # ----------------------------------------
 
 OUT_DIR = os.path.join(BASE_OUT, RUN_ID)
@@ -48,17 +49,29 @@ def worker_init(model_state_path=None, simulations=200, c_puct=1.4):
     print(f"[{current_process().name}] ready (pid={os.getpid()}, seed={seed})")
 
 
+# ------------------------------------------------
 def worker_run(args):
     n_games, out_dir, chunk_id = args
+    chunk_files = []
+    MAX_MOVES_PER_GAME = 300  # <-- limite du nombre de coups avant draw
+
     for i in range(n_games):
         start_t = time.time()
-        states, pis, zs, players = self_play_one_game(WORKER_MCTS)
 
-        ts = datetime.now().strftime("%d-%m-%Y_%Hh%M")  # format option 2
-        fname = os.path.join(out_dir, f"worker-{current_process().name}_game{i}_#{ts}.npz")
+        # Génération d'une partie avec limite de coups
+        states, pis, zs, players = self_play_one_game(WORKER_MCTS, max_moves=MAX_MOVES_PER_GAME)
 
+        # Si la partie s’est terminée par limite de coups, on ajuste le résultat à 0 (draw)
+        if len(states) >= MAX_MOVES_PER_GAME:
+            zs[:] = 0.0  # toutes les positions sont des match nuls
+            print(f"[{current_process().name}] Draw by move limit ({MAX_MOVES_PER_GAME})")
+
+        fname = os.path.join(out_dir, f"{current_process().name}_chunk{chunk_id}_game{i}.npz")
         np.savez_compressed(fname, states=states, pis=pis, zs=zs, players=players)
-        print(f"[{current_process().name}] saved {fname} ({states.shape[0]} moves) in {time.time() - start_t:.1f}s")
+        took = time.time() - start_t
+        print(f"[{current_process().name}] saved {fname} ({states.shape[0]} moves) in {took:.1f}s")
+        chunk_files.append(fname)
+    return chunk_files
 
 
 def main():
