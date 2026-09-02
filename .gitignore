@@ -1,5 +1,3 @@
 __pycache__
 model/__pycache__
-test_mcts_chess.py
-test_mcts_suite.py
-mini_code.py
+data/*
